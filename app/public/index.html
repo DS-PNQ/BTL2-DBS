@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quản lý đặt phòng</title>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --text:#1d2330; --muted:#6b7385; --line:#e3e6ec; --brand:#0b5cad; --danger:#c62828; --ok:#2e7d32; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui, "Segoe UI", Roboto, sans-serif; background:var(--bg); color:var(--text); }
+  header { background:var(--brand); color:#fff; padding:12px 24px; display:flex; align-items:center; gap:24px; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; }
+  nav button { background:transparent; color:#fff; border:0; padding:8px 14px; border-radius:6px; font-size:14px; cursor:pointer; }
+  nav button[aria-selected="true"] { background:rgba(255,255,255,.2); font-weight:600; }
+  main { padding:20px 24px; max-width:1400px; margin:auto; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .card h2 { font-size:16px; margin:0 0 12px; }
+  form.bar { display:flex; flex-wrap:wrap; gap:10px; align-items:end; }
+  label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
+  input, select, textarea { font:inherit; padding:7px 9px; border:1px solid #c9ced8; border-radius:6px; background:#fff; color:var(--text); }
+  input:focus, select:focus, textarea:focus { outline:2px solid #9cc3ef; border-color:var(--brand); }
+  button { font:inherit; padding:7px 14px; border-radius:6px; border:1px solid #c9ced8; background:#fff; cursor:pointer; }
+  button.primary { background:var(--brand); border-color:var(--brand); color:#fff; }
+  button.danger { color:var(--danger); border-color:#efb3b3; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .spacer { flex:1; }
+  .table-wrap { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { padding:9px 8px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; white-space:nowrap; }
+  th { font-size:12px; color:var(--muted); font-weight:600; user-select:none; }
+  th[data-key] { cursor:pointer; }
+  th[data-key]:hover { color:var(--brand); }
+  th.asc::after { content:" ▲"; } th.desc::after { content:" ▼"; }
+  td.num, th.num { text-align:right; }
+  td .sub { color:var(--muted); font-size:12px; }
+  td.actions { display:flex; gap:6px; }
+  .empty { text-align:center; color:var(--muted); padding:24px; }
+  .badge { padding:2px 8px; border-radius:10px; font-size:12px; font-weight:600; }
+  .PENDING { background:#fff4d6; color:#8a6100; } .CONFIRMED { background:#ddeeff; color:#0b5cad; }
+  .COMPLETED { background:#dff3e2; color:#1e6b2a; } .CANCELLED { background:#f3e0e0; color:#9b2222; }
+  .muted { color:var(--muted); }
+  dialog { border:0; border-radius:12px; padding:0; width:min(680px, 96vw); box-shadow:0 20px 60px rgba(0,0,0,.25); }
+  dialog::backdrop { background:rgba(20,25,35,.45); }
+  dialog form { padding:20px; }
+  dialog h2 { margin:0 0 14px; font-size:18px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:12px; }
+  .grid .wide { grid-column:1 / -1; }
+  .error { background:#fdecec; color:var(--danger); border:1px solid #f3c2c2; padding:9px 12px; border-radius:6px; margin-bottom:12px; }
+  .hint { font-size:12px; color:var(--muted); }
+  .dialog-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+  form.editing .create-only, form:not(.editing) .edit-only { display:none; }
+  #toast { position:fixed; right:20px; bottom:20px; padding:12px 16px; border-radius:8px; color:#fff; background:var(--ok); max-width:480px; box-shadow:0 6px 20px rgba(0,0,0,.2); }
+  #toast.err { background:var(--danger); }
+  .meter { height:14px; background:#e8ebf0; border-radius:7px; overflow:hidden; margin-top:8px; max-width:420px; }
+  .meter > div { height:100%; background:var(--brand); }
+  .big { font-size:28px; font-weight:700; }
+  tfoot td { font-weight:700; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Hệ thống quản lý đặt phòng</h1>
+  <nav role="tablist">
+    <button role="tab" data-tab="tab-bookings" aria-selected="true">Đơn đặt phòng</button>
+    <button role="tab" data-tab="tab-stats" aria-selected="false">Thống kê</button>
+  </nav>
+</header>
+
+<main>
+  <!-- 3.1 + 3.2: danh sách đơn (sp_search_bookings), thêm/sửa/xóa (sp_insert/update/delete_booking) -->
+  <section id="tab-bookings">
+    <div class="card">
+      <form id="filter" class="bar">
+        <label>Từ khóa<input name="keyword" placeholder="Tên khách, email, mã đơn, cơ sở" size="28"></label>
+        <label>Thành phố<select name="city" id="f-city"></select></label>
+        <label>Trạng thái
+          <select name="status">
+            <option value="">Tất cả</option>
+            <option value="PENDING">Chờ thanh toán</option>
+            <option value="CONFIRMED">Đã xác nhận</option>
+            <option value="COMPLETED">Đã hoàn thành</option>
+            <option value="CANCELLED">Đã hủy</option>
+          </select>
+        </label>
+        <label>Nhận phòng từ<input type="date" name="from"></label>
+        <label>đến<input type="date" name="to"></label>
+        <button class="primary">Tìm kiếm</button>
+        <button type="reset">Xóa lọc</button>
+        <span class="spacer"></span>
+        <button type="button" class="primary" id="btn-add">+ Đặt phòng mới</button>
+      </form>
+    </div>
+    <div class="card">
+      <div class="muted" id="count"></div>
+      <div class="table-wrap">
+        <table id="list">
+          <thead><tr>
+            <th data-key="BOOKING_CODE">Mã đơn</th>
+            <th data-key="GUEST_NAME">Khách hàng</th>
+            <th data-key="ACCOMMODATION_NAME">Cơ sở lưu trú</th>
+            <th data-key="CHECK_IN_DATE">Nhận phòng</th>
+            <th data-key="CHECK_OUT_DATE">Trả phòng</th>
+            <th data-key="TOTAL_NIGHTS" class="num">Đêm</th>
+            <th data-key="ADULTS" class="num">Khách</th>
+            <th data-key="STATUS">Trạng thái</th>
+            <th data-key="TOTAL_AMOUNT" class="num">Tổng tiền</th>
+            <th></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3.3: sp_revenue_by_accommodation + fn_occupancy_rate -->
+  <section id="tab-stats" hidden>
+    <div class="card">
+      <h2>Doanh thu theo cơ sở lưu trú <span class="muted">(đơn đã hoàn thành)</span></h2>
+      <form id="rev-form" class="bar">
+        <label>Thành phố<select name="city" id="r-city"></select></label>
+        <label>Trả phòng từ<input type="date" name="from"></label>
+        <label>đến<input type="date" name="to"></label>
+        <label>Doanh thu tối thiểu (₫)<input type="number" name="minRevenue" min="0" step="100000" value="0"></label>
+        <button class="primary">Thống kê</button>
+      </form>
+      <div class="table-wrap" style="margin-top:12px">
+        <table id="rev">
+          <thead><tr>
+            <th>Cơ sở</th><th>Loại hình</th><th>Thành phố</th><th class="num">Sao</th><th class="num">Số đơn</th>
+            <th class="num">Đêm bán</th><th class="num">Doanh thu</th><th class="num">TB / đơn</th><th class="num">Điểm TB</th>
+          </tr></thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Công suất phòng</h2>
+      <form id="occ-form" class="bar">
+        <label>Cơ sở lưu trú<select name="accommodationId" id="o-acc" required></select></label>
+        <label>Từ ngày<input type="date" name="from" required></label>
+        <label>Đến ngày<input type="date" name="to" required></label>
+        <button class="primary">Tính</button>
+      </form>
+      <div id="occ-result" style="margin-top:14px"></div>
+    </div>
+  </section>
+</main>
+
+<dialog id="dlg">
+  <form id="bform" novalidate>
+    <h2 id="dlg-title"></h2>
+    <div class="error" id="b-error" hidden></div>
+    <div class="grid">
+      <label class="create-only wide">Khách hàng *<select name="userId" id="b-guest" required></select></label>
+      <label class="create-only wide">Cơ sở lưu trú *<select name="accommodationId" id="b-acc" required></select></label>
+      <label class="create-only">Hạng phòng *<select name="roomName" id="b-room" required></select></label>
+      <label class="create-only">Gói giá *<select name="roomRateId" id="b-rate" required></select></label>
+      <label class="create-only">Số phòng *<input type="number" name="quantity" min="1" max="10" required></label>
+      <div class="create-only hint wide" id="b-capacity"></div>
+      <label>Ngày nhận phòng *<input type="date" name="checkIn" required></label>
+      <label>Ngày trả phòng *<input type="date" name="checkOut" required></label>
+      <label>Người lớn *<input type="number" name="adults" min="1" max="60" required></label>
+      <label>Trẻ em<input type="number" name="children" min="0" max="30"></label>
+      <label>Giờ đến dự kiến<input type="time" name="eta"></label>
+      <label class="edit-only">Trạng thái<select name="status" id="b-status"></select></label>
+      <label class="wide">Yêu cầu đặc biệt<textarea name="requests" rows="2" maxlength="500"></textarea></label>
+      <label class="edit-only wide" id="cancel-box">Lý do hủy<input name="cancelReason" maxlength="255" placeholder="Khách yêu cầu hủy"></label>
+      <div class="edit-only hint wide" id="refund-preview"></div>
+    </div>
+    <div class="dialog-actions">
+      <button type="button" id="btn-cancel">Đóng</button>
+      <button class="primary" id="btn-save">Lưu</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" hidden></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+const money = (v) => (v == null ? '—' : Number(v).toLocaleString('vi-VN') + ' ₫');
+const vnDate = (d) => (d ? d.split('-').reverse().join('/') : '');
+const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
+const STATUS = { PENDING: 'Chờ thanh toán', CONFIRMED: 'Đã xác nhận', COMPLETED: 'Đã hoàn thành', CANCELLED: 'Đã hủy' };
+const NEXT = { PENDING: ['CONFIRMED', 'CANCELLED'], CONFIRMED: ['COMPLETED', 'CANCELLED'], COMPLETED: [], CANCELLED: [] };
+const ACC_TYPE = { HOTEL: 'Khách sạn', RESORT: 'Resort', APARTMENT: 'Căn hộ', HOMESTAY: 'Homestay' };
+
+let lookups, rows = [], sortKey = null, sortDir = 1, editing = null;
+
+async function api(url, opts = {}) {
+  const res = await fetch(url, { ...opts, headers: { 'Content-Type': 'application/json' }, body: opts.body && JSON.stringify(opts.body) });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Lỗi HTTP ${res.status}`);
+  return data;
+}
+
+let toastTimer;
+function toast(msg, isError = false) {
+  const t = $('#toast');
+  t.textContent = msg; t.className = isError ? 'err' : ''; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), isError ? 6000 : 3000);
+}
+
+function fillSelect(sel, pairs, placeholder) {
+  sel.innerHTML = (placeholder != null ? `<option value="">${esc(placeholder)}</option>` : '')
+    + pairs.map(([v, t]) => `<option value="${esc(v)}">${esc(t)}</option>`).join('');
+}
+
+// ---------- Danh sách (3.2) ----------
+const sortVal = (v) => (v !== null && v !== '' && !isNaN(v) ? Number(v) : String(v ?? ''));
+function cmp(a, b) {
+  a = sortVal(a); b = sortVal(b);
+  return typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b), 'vi');
+}
+
+function render() {
+  const list = sortKey ? [...rows].sort((a, b) => cmp(a[sortKey], b[sortKey]) * sortDir) : rows;
+  document.querySelectorAll('#list th[data-key]').forEach((th) => {
+    th.className = (th.classList.contains('num') ? 'num ' : '') + (th.dataset.key === sortKey ? (sortDir > 0 ? 'asc' : 'desc') : '');
+  });
+  $('#list tbody').innerHTML = list.map((r) => `
+    <tr>
+      <td><b>${esc(r.BOOKING_CODE)}</b><div class="sub">Đặt ${vnDate(r.BOOKING_DATE)}</div></td>
+      <td>${esc(r.GUEST_NAME)}<div class="sub">${esc(r.EMAIL)}</div></td>
+      <td>${esc(r.ACCOMMODATION_NAME)}<div class="sub">${esc(r.CITY)}</div></td>
+      <td>${vnDate(r.CHECK_IN_DATE)}</td>
+      <td>${vnDate(r.CHECK_OUT_DATE)}</td>
+      <td class="num">${r.TOTAL_NIGHTS}</td>
+      <td class="num">${r.ADULTS} NL${r.CHILDREN ? ` + ${r.CHILDREN} TE` : ''}</td>
+      <td><span class="badge ${r.STATUS}">${STATUS[r.STATUS]}</span></td>
+      <td class="num">${money(r.TOTAL_AMOUNT)}</td>
+      <td class="actions">
+        <button data-edit="${r.BOOKING_ID}">Sửa</button>
+        <button data-del="${r.BOOKING_ID}" class="danger">Xóa</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="10" class="empty">Không có đơn nào khớp điều kiện tìm kiếm</td></tr>';
+  $('#count').textContent = `${rows.length} đơn đặt phòng`;
+}
+
+async function search(e) {
+  e?.preventDefault();
+  const f = $('#filter');
+  if (f.from.value && f.to.value && f.from.value > f.to.value) return toast('Ngày "nhận phòng từ" phải trước ngày "đến"', true);
+  try {
+    rows = await api('/api/bookings?' + new URLSearchParams(new FormData(f)));
+    render();
+  } catch (err) { toast(err.message, true); }
+}
+
+$('#filter').addEventListener('submit', search);
+$('#filter').addEventListener('change', (e) => { if (e.target.name !== 'keyword') search(); });
+$('#filter').addEventListener('reset', () => setTimeout(search));
+$('#list thead').addEventListener('click', (e) => {
+  const key = e.target.dataset?.key;
+  if (!key) return;
+  sortDir = key === sortKey ? -sortDir : 1;
+  sortKey = key;
+  render();
+});
+$('#list tbody').addEventListener('click', (e) => {
+  const id = e.target.dataset.edit || e.target.dataset.del;
+  const row = rows.find((r) => String(r.BOOKING_ID) === id);
+  if (!row) return;
+  if (e.target.dataset.edit) openForm(row); else removeBooking(row);
+});
+
+async function removeBooking(row) {
+  if (!confirm(`Xóa đơn ${row.BOOKING_CODE} của ${row.GUEST_NAME}?\nChỉ xóa được đơn chưa xác nhận và chưa phát sinh thanh toán.`)) return;
+  try {
+    await api(`/api/bookings/${row.BOOKING_ID}`, { method: 'DELETE' });
+    toast(`Đã xóa đơn ${row.BOOKING_CODE}`);
+    search();
+  } catch (err) { toast(err.message, true); }
+}
+
+// ---------- Form thêm / sửa (3.1) ----------
+const form = $('#bform');
+const ratesOf = () => lookups.rates.filter((r) => String(r.ACCOMMODATION_ID) === form.accommodationId.value);
+const selectedRate = () => ratesOf().find((r) => r.ROOM_NAME === form.roomName.value && String(r.ROOM_RATE_ID) === form.roomRateId.value);
+
+function onAccommodationChange() {
+  const rooms = [...new Set(ratesOf().map((r) => r.ROOM_NAME))];
+  fillSelect(form.roomName, rooms.map((n) => [n, n]), rooms.length ? '-- Chọn hạng phòng --' : 'Cơ sở chưa có hạng phòng');
+  onRoomChange();
+}
+function onRoomChange() {
+  const rates = ratesOf().filter((r) => r.ROOM_NAME === form.roomName.value);
+  fillSelect(form.roomRateId, rates.map((r) => [r.ROOM_RATE_ID,
+    `${money(r.UNIT_PRICE)}/đêm · ${r.BREAKFAST_INCLUDED ? 'có ăn sáng' : 'không ăn sáng'} · ${r.FREE_CANCELLATION ? 'hủy miễn phí' : 'không hoàn tiền'}`
+    + (r.EFFECTIVE_DATE > today ? ` (áp dụng từ ${vnDate(r.EFFECTIVE_DATE)})` : '')]), '-- Chọn gói giá --');
+  showCapacity();
+}
+function showCapacity() {
+  const r = selectedRate(), q = Number(form.quantity.value) || 1;
+  $('#b-capacity').textContent = r ? `Sức chứa ${q} phòng: tối đa ${r.ADULTS * q} người lớn, ${(r.ADULTS + r.CHILDREN) * q} khách.` : '';
+}
+form.accommodationId.addEventListener('change', onAccommodationChange);
+form.roomName.addEventListener('change', onRoomChange);
+form.roomRateId.addEventListener('change', showCapacity);
+form.quantity.addEventListener('input', showCapacity);
+
+function showError(msg) { const box = $('#b-error'); box.textContent = msg; box.hidden = !msg; }
+
+function openForm(row) {
+  editing = row || null;
+  form.reset();
+  showError('');
+  form.classList.toggle('editing', !!row);
+  form.querySelectorAll('.create-only select, .create-only input').forEach((el) => (el.disabled = !!row));
+  form.querySelectorAll('.edit-only select, .edit-only input').forEach((el) => (el.disabled = !row));
+  $('#dlg-title').textContent = row ? `Sửa đơn ${row.BOOKING_CODE} — ${row.GUEST_NAME}` : 'Đặt phòng mới';
+  form.checkIn.min = row ? '' : today;
+  if (row) {
+    form.checkIn.value = row.CHECK_IN_DATE;
+    form.checkOut.value = row.CHECK_OUT_DATE;
+    form.adults.value = row.ADULTS;
+    form.children.value = row.CHILDREN;
+    form.eta.value = (row.ESTIMATED_ARRIVAL_TIME || '').slice(0, 5);
+    form.requests.value = row.SPECIAL_REQUESTS || '';
+    fillSelect(form.status, [row.STATUS, ...NEXT[row.STATUS]].map((s) => [s, STATUS[s]]));
+  } else {
+    form.quantity.value = 1; form.adults.value = 2; form.children.value = 0;
+    form.checkIn.value = addDays(today, 1); form.checkOut.value = addDays(today, 2);
+    onAccommodationChange();
+  }
+  onStatusChange();
+  $('#dlg').showModal();
+}
+
+async function onStatusChange() {
+  const cancelling = editing && form.status.value === 'CANCELLED' && editing.STATUS !== 'CANCELLED';
+  $('#cancel-box').style.display = cancelling ? '' : 'none';
+  const box = $('#refund-preview');
+  box.textContent = '';
+  if (!cancelling) return;
+  try {   // fn_refund_amount
+    const { refund, paid } = await api(`/api/bookings/${editing.BOOKING_ID}/refund`);
+    box.textContent = paid
+      ? `Đã thanh toán ${money(paid)} → hoàn lại ${money(refund)}, phí hủy ${money(paid - refund)}.`
+      : 'Đơn chưa thanh toán: hủy không mất phí.';
+  } catch (err) { box.textContent = err.message; }
+}
+form.status.addEventListener('change', onStatusChange);
+
+function validate() {
+  const ci = form.checkIn.value, co = form.checkOut.value;
+  const changedDates = !editing || ci !== editing.CHECK_IN_DATE || co !== editing.CHECK_OUT_DATE;
+  if (changedDates && ci < today) return 'Ngày nhận phòng không được trước hôm nay';
+  if (co <= ci) return 'Ngày trả phòng phải sau ngày nhận phòng ít nhất 1 ngày';
+  if ((new Date(co) - new Date(ci)) / 864e5 > 30) return 'Mỗi đơn chỉ được lưu trú tối đa 30 đêm';
+  const adults = Number(form.adults.value), children = Number(form.children.value || 0);
+  if (!Number.isInteger(adults) || adults < 1) return 'Đơn phải có ít nhất 1 người lớn';
+  if (!Number.isInteger(children) || children < 0) return 'Số trẻ em phải là số nguyên không âm';
+  if (!editing) {
+    const r = selectedRate(), q = Number(form.quantity.value);
+    if (r && (adults > r.ADULTS * q || adults + children > (r.ADULTS + r.CHILDREN) * q))
+      return `${q} phòng "${r.ROOM_NAME}" chỉ chứa tối đa ${r.ADULTS * q} người lớn, ${(r.ADULTS + r.CHILDREN) * q} khách`;
+  }
+  return '';
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const invalid = [...form.elements].find((el) => !el.disabled && !el.checkValidity());
+  if (invalid) { showError(`${invalid.closest('label')?.firstChild.textContent.replace('*', '').trim()}: ${invalid.validationMessage}`); return invalid.focus(); }
+  const msg = validate();
+  if (msg) return showError(msg);
+  if (editing && form.status.value === 'CANCELLED' && editing.STATUS !== 'CANCELLED'
+      && !confirm(`Xác nhận hủy đơn ${editing.BOOKING_CODE}?`)) return;
+  const body = Object.fromEntries(new FormData(form));
+  $('#btn-save').disabled = true;
+  try {
+    if (editing) await api(`/api/bookings/${editing.BOOKING_ID}`, { method: 'PUT', body });
+    else await api('/api/bookings', { method: 'POST', body });
+    $('#dlg').close();
+    toast(editing ? `Đã cập nhật đơn ${editing.BOOKING_CODE}` : 'Đã tạo đơn đặt phòng mới');
+    search();
+  } catch (err) { showError(err.message); }
+  finally { $('#btn-save').disabled = false; }
+});
+$('#btn-cancel').addEventListener('click', () => $('#dlg').close());
+$('#btn-add').addEventListener('click', () => openForm(null));
+
+// ---------- Thống kê (3.3) ----------
+$('#rev-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  if (f.from.value && f.to.value && f.from.value > f.to.value) return toast('Ngày bắt đầu phải trước ngày kết thúc', true);
+  if (!f.minRevenue.checkValidity()) return toast('Doanh thu tối thiểu phải là số không âm', true);
+  try {
+    const data = await api('/api/revenue?' + new URLSearchParams(new FormData(f)));
+    $('#rev tbody').innerHTML = data.map((r) => `
+      <tr>
+        <td>${esc(r.NAME)}</td><td>${ACC_TYPE[r.ACC_TYPE]}</td><td>${esc(r.CITY)}</td><td class="num">${r.STAR_RATING}★</td>
+        <td class="num">${r.COMPLETED_BOOKINGS}</td><td class="num">${r.NIGHTS_SOLD}</td><td class="num">${money(r.REVENUE)}</td>
+        <td class="num">${money(r.AVG_BOOKING_VALUE)}</td><td class="num">${r.AVERAGE_RATING ?? '—'}${r.REVIEWS ? ` <span class="muted">(${r.REVIEWS})</span>` : ''}</td>
+      </tr>`).join('') || '<tr><td colspan="9" class="empty">Không có cơ sở nào đạt điều kiện</td></tr>';
+    const total = data.reduce((s, r) => s + Number(r.REVENUE), 0);
+    $('#rev tfoot').innerHTML = data.length ? `<tr><td colspan="6">Tổng ${data.length} cơ sở</td><td class="num">${money(total)}</td><td colspan="2"></td></tr>` : '';
+  } catch (err) { toast(err.message, true); }
+});
+
+$('#occ-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  if (!f.reportValidity()) return;
+  if (f.to.value <= f.from.value) return toast('Ngày kết thúc phải sau ngày bắt đầu', true);
+  try {
+    const { rate } = await api('/api/occupancy?' + new URLSearchParams(new FormData(f)));
+    const name = f.accommodationId.selectedOptions[0].textContent;
+    $('#occ-result').innerHTML = `<div class="muted">${esc(name)}, ${vnDate(f.from.value)} – ${vnDate(f.to.value)}</div>
+      <div class="big">${Number(rate).toLocaleString('vi-VN')}%</div>
+      <div class="meter"><div style="width:${Math.min(100, rate)}%"></div></div>`;
+  } catch (err) { $('#occ-result').innerHTML = `<div class="error">${esc(err.message)}</div>`; }
+});
+
+document.querySelectorAll('nav button').forEach((btn) => btn.addEventListener('click', () => {
+  document.querySelectorAll('nav button').forEach((b) => {
+    b.setAttribute('aria-selected', b === btn);
+    document.getElementById(b.dataset.tab).hidden = b !== btn;
+  });
+}));
+
+(async function init() {
+  try {
+    lookups = await api('/api/lookups');
+  } catch (err) { return toast('Không kết nối được CSDL: ' + err.message, true); }
+  const cities = [...new Set(lookups.accommodations.map((a) => a.CITY))].sort((a, b) => a.localeCompare(b, 'vi'));
+  fillSelect($('#f-city'), cities.map((c) => [c, c]), 'Tất cả');
+  fillSelect($('#r-city'), cities.map((c) => [c, c]), 'Tất cả');
+  const accs = lookups.accommodations.map((a) => [a.ACCOMMODATION_ID, `${a.NAME} — ${a.CITY}`]);
+  fillSelect($('#b-acc'), accs, '-- Chọn cơ sở --');
+  fillSelect($('#o-acc'), accs, '-- Chọn cơ sở --');
+  fillSelect($('#b-guest'), lookups.guests.map((g) => [g.USER_ID, `${g.FULL_NAME} (${g.EMAIL})`]), '-- Chọn khách hàng --');
+  const rf = $('#rev-form'); rf.from.value = addDays(today, -365); rf.to.value = today;
+  const of = $('#occ-form'); of.from.value = addDays(today, -90); of.to.value = addDays(today, 30);
+  search();
+})();
+</script>
+</body>
+</html>
